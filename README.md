@@ -98,6 +98,30 @@ python3 scripts/evaluate_detector.py --lookback-minutes 60 --step-minutes 5
 
 This reports available history and candidate IDs at each cutoff. It excludes future observation times but is not a point-in-time arrival-log backtest or a measure of predictive accuracy.
 
+## Investigation API
+
+The FastAPI service runs locally at `http://localhost:8000`. Start it against the running database with `docker compose up -d --build api`. Interactive endpoint documentation is at [localhost:8000/docs](http://localhost:8000/docs).
+
+| Route | Purpose |
+| --- | --- |
+| `/health` | Database availability and recent collection freshness; stale collection returns 503 |
+| `/v1/radar?limit=10` | Ranked candidates plus eligibility/exclusion counts and rules |
+| `/v1/stories?limit=20&offset=0` | Recently sampled stories, including quiet ones |
+| `/v1/stories/{story_id}/history` | Attention changes and raw samples over the last 63 minutes |
+| `/v1/stories/{story_id}/explanation` | Candidate/quiet/excluded decision and channel-level evidence |
+
+All `/v1` routes accept `as_of`, a timezone-aware ISO timestamp. Future or malformed cutoffs and invalid IDs/limits return 422. An unavailable observation store returns a sanitized 503. A story with no observations in the requested interval returns 404; this does not mean the story never existed. Empty rankings return 200 with coverage counts so insufficient evidence is distinguishable from quiet activity. Use `evidence=false` to omit raw samples from history responses.
+
+The API uses the same calculation code as the CLI. Requests have bounded observation windows and run as synchronous FastAPI handlers so database reads do not block the event loop. It is read-only and bound to localhost; authentication, caching, WebSockets and public deployment are not implemented. `/health` checks collection/database freshness, not Flink checkpoint health.
+
+Run the complete suite (41 analytics tests plus 12 API tests) with Python 3.12 supplied by Docker:
+
+```sh
+docker compose run --rm --build --no-deps api-tests
+```
+
+The original `python3 -m unittest discover -s tests -v` command still runs the dependency-free analytics suite. API tests live separately under `tests/api`.
+
 ## Stop and restore
 
 Save open windows and source offsets before shutting down:

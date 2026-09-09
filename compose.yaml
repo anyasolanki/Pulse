@@ -1,5 +1,23 @@
 name: pulse
 services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+      target: runtime
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      CLICKHOUSE_URL: http://clickhouse:8123
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+  api-tests:
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+      target: test
   kafka:
     image: apache/kafka:3.9.0
     ports:
