@@ -1,0 +1,16 @@
+export async function GET(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params;
+  const suffix = path.join('/');
+  if (!/^(health|v1\/(radar|stories|stories\/\d+\/(history|explanation)))$/.test(suffix))
+    return Response.json({ detail: 'Unknown endpoint' }, { status: 404 });
+  try {
+    const url = new URL(request.url);
+    const upstream = await fetch(`http://127.0.0.1:8000/${suffix}${url.search}`, {
+      signal: AbortSignal.timeout(20000), headers: { Accept: 'application/json' },
+    });
+    return new Response(await upstream.text(), { status: upstream.status,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+  } catch {
+    return Response.json({ detail: 'Pulse cannot reach the local data service. Check that Docker and the API are running.' }, { status: 503 });
+  }
+}

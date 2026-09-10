@@ -122,6 +122,24 @@ docker compose run --rm --build --no-deps api-tests
 
 The original `python3 -m unittest discover -s tests -v` command still runs the dependency-free analytics suite. API tests live separately under `tests/api`.
 
+## Local frontend
+
+The Radar and Investigate screens live in `frontend/` and connect to the local API through the same origin. Keep the Docker API running, then start the frontend:
+
+```sh
+cd frontend
+npm run dev -- --hostname 127.0.0.1 --port 3000
+```
+
+Open `http://127.0.0.1:3000`. The Radar view refreshes every 30 seconds and makes empty rankings explicit. Select any recently observed story to inspect its 5/30/60-minute changes, detector explanation, charts, and original samples. Observation gaps longer than three minutes appear as chart breaks and amber evidence-table rows.
+
+The frontend is deliberately local because its live data service runs on this Mac. It does not authenticate users, publish the data, or provide a remote deployment. Validate it with:
+
+```sh
+cd frontend
+npm run build
+```
+
 ## Stop and restore
 
 Save open windows and source offsets before shutting down:
