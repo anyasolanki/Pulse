@@ -116,23 +116,25 @@ All `/v1` routes accept `as_of`, a timezone-aware ISO timestamp. Future or malfo
 
 The API uses the same calculation code as the CLI. Requests have bounded observation windows and run as synchronous FastAPI handlers so database reads do not block the event loop. It is read-only and bound to localhost; authentication, caching, WebSockets and public deployment are not implemented. `/health` checks collection/database freshness, not Flink checkpoint health.
 
-## Add Reddit locally
+## Reddit source: approval required
 
-Reddit collection is opt-in. It uses OAuth client credentials and retains only post-level fields needed for Pulse (title, subreddit, permalink, creation time, score, comment count, and vote ratio). It never stores an author, body text, or OAuth token; the raw Reddit table automatically removes observations after 30 days.
+Reddit's current Responsible Builder Policy requires explicit approval before any API data access. It directs developers to the [Developer Platform](https://developers.reddit.com/) and says to [file a ticket](https://support.reddithelp.com/hc/en-us/requests/new) when the use case is not supported there. Pulse must not collect Reddit data until that approval is granted and the app has a registered developer profile and app-profile label.
 
-Create a Reddit app that supplies OAuth client credentials, then copy `.env.example` to `.env` and replace its three credential placeholders. Choose an identifiable `REDDIT_USER_AGENT` containing your Reddit username. Keep `.env` private: it is already ignored by Git.
+The code and storage schema are present but the Docker collector has a mandatory approval guard. Do not set `REDDIT_ACCESS_APPROVED=yes`, add credentials, or start `reddit-ingestion` until Reddit approves the use case. The planned scope is deliberately limited to public submission-level metrics for selected subreddits; it does not store authors or post bodies, infer characteristics about users, or join Reddit users to off-platform identities. When approval arrives, copy `.env.example` to `.env`, record the approval's app-profile label, and add the approved credentials there. `.env` is ignored by Git.
 
-Apply the additive table migration and start the opt-in collector:
+Once approved, start collection and confirm it is receiving data:
 
 ```sh
-docker compose exec -T clickhouse clickhouse-client --user pulse --password pulse-local --multiquery < infra/clickhouse/002_observations.sql
 docker compose --profile reddit up -d --build reddit-ingestion
+docker compose exec clickhouse clickhouse-client --user pulse --password pulse-local --query "SELECT subreddit, count() FROM pulse.reddit_observations FINAL GROUP BY subreddit ORDER BY count() DESC"
 ```
 
-After a few minutes, confirm that it is receiving data:
+The collector retains only post-level fields needed for Pulse (title, subreddit, permalink, creation time, score, comment count, and vote ratio). The raw Reddit table automatically removes observations after 30 days.
+
+Until approval, the Reddit endpoint correctly returns no posts:
 
 ```sh
-docker compose exec clickhouse clickhouse-client --user pulse --password pulse-local --query "SELECT subreddit, count() FROM pulse.reddit_observations FINAL GROUP BY subreddit ORDER BY count() DESC"
+curl 'http://127.0.0.1:8000/v1/reddit/posts'
 ```
 
 The Reddit routes are intentionally source-specific for now. A post ID and an HN story ID do not establish that they describe the same topic; cross-source matching needs an explicit evidence rule before it can produce combined alerts.

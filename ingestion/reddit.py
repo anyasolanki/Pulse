@@ -22,6 +22,15 @@ def required(name):
     return value
 
 
+def require_approved_access():
+    if os.getenv("REDDIT_ACCESS_APPROVED", "").casefold() != "yes":
+        raise RuntimeError(
+            "Reddit API collection is disabled until Reddit has explicitly approved this use case. "
+            "See README.md before setting REDDIT_ACCESS_APPROVED=yes."
+        )
+    required("REDDIT_APP_PROFILE_LABEL")
+
+
 class RedditClient:
     def __init__(self, client_id, client_secret, user_agent, opener=urlopen):
         self.client_id, self.client_secret, self.user_agent = client_id, client_secret, user_agent
@@ -90,6 +99,7 @@ def main():
     if args.limit < 1 or args.interval < 30:
         parser.error("limit must be positive and interval must be at least 30 seconds")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    require_approved_access()
     client = RedditClient(required("REDDIT_CLIENT_ID"), required("REDDIT_CLIENT_SECRET"), required("REDDIT_USER_AGENT"))
     subreddits = [value.strip() for value in os.getenv("REDDIT_SUBREDDITS", "technology,programming,science").split(",") if value.strip()]
     if not subreddits:
