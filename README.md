@@ -122,6 +122,8 @@ Reddit's current Responsible Builder Policy requires explicit approval before an
 
 The code and storage schema are present but the Docker collector has a mandatory approval guard. Do not set `REDDIT_ACCESS_APPROVED=yes`, add credentials, or start `reddit-ingestion` until Reddit approves the use case. The planned scope is deliberately limited to public submission-level metrics for selected subreddits; it does not store authors or post bodies, infer characteristics about users, or join Reddit users to off-platform identities. When approval arrives, copy `.env.example` to `.env`, record the approval's app-profile label, and add the approved credentials there. `.env` is ignored by Git.
 
+The registered Devvit app is named `pulse-signal-2026`; its local source is in `integrations/reddit-devvit/`. It is a bare, buildable starting point and has not been playtested, installed in a subreddit, or submitted for review. Verify its local build with `cd integrations/reddit-devvit && npm run build`. `npm run playtest` uploads and installs the app, while `npm run publish` files an app-review request, so neither is part of the local setup.
+
 Once approved, start collection and confirm it is receiving data:
 
 ```sh
