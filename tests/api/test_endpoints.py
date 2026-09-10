@@ -83,3 +83,21 @@ class APITests(unittest.TestCase):
     def test_openapi_available(self):
         paths = self.client.get('/openapi.json').json()['paths']
         self.assertIn('/v1/stories/{story_id}/explanation', paths)
+
+    def test_reddit_posts_are_source_specific(self):
+        rows = [{
+            'post_id': 'a1', 'subreddit': 'technology', 'title': 'A launch', 'url': 'https://reddit.com/x',
+            'observed_at': NOW.isoformat(), 'score': '12', 'comments': '4', 'upvote_ratio': '0.8',
+        }]
+        with patch('api.main.reddit_store.observations', return_value=rows) as reddit_read:
+            response = self.client.get('/v1/reddit/posts', params=self.params)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['posts'][0]['post_id'], 'a1')
+        reddit_read.assert_called_once_with(NOW, minutes=120, post_id=None)
+
+    def test_reddit_history_has_no_detector_claim(self):
+        rows = [{'post_id': 'a1', 'observed_at': NOW.isoformat()}]
+        with patch('api.main.reddit_store.observations', return_value=rows):
+            response = self.client.get('/v1/reddit/posts/a1/history', params=self.params)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['source'], 'reddit')

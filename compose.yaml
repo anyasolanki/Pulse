@@ -52,7 +52,7 @@ services:
     entrypoint: ["/bin/bash", "-ec"]
     command:
       - |
-        for topic in hn.observations.v1 hn.story-windows.v1 hn.story-windows.v2; do
+        for topic in hn.observations.v1 hn.story-windows.v1 hn.story-windows.v2 reddit.observations.v1; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic "$$topic" --partitions 1 --replication-factor 1 --config retention.ms=604800000
         done
   jobmanager:
@@ -121,6 +121,19 @@ services:
       context: .
       dockerfile: ingestion/Dockerfile
     restart: on-failure
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+  reddit-ingestion:
+    profiles: [reddit]
+    build:
+      context: .
+      dockerfile: ingestion/Dockerfile
+    command: ["python", "-m", "ingestion.reddit"]
+    restart: on-failure
+    env_file: .env
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
     depends_on:

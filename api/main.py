@@ -5,7 +5,7 @@ from urllib.error import URLError
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
-from analytics import store
+from analytics import reddit_store, store
 from analytics.attention import attention, timestamp
 from analytics.detector import detect, evaluate, VERSION, RULES
 
@@ -35,6 +35,13 @@ def read(end, minutes=22, story_id=None):
     except (OSError, URLError, ValueError) as error:
         # Do not return upstream errors that can contain SQL, addresses or credentials.
         raise HTTPException(503, 'Observation store is unavailable; try again shortly') from error
+
+
+def read_reddit(end, minutes=120, post_id=None):
+    try:
+        return reddit_store.observations(end, minutes=minutes, post_id=post_id)
+    except (OSError, URLError, ValueError) as error:
+        raise HTTPException(503, 'Reddit observation store is unavailable; try again shortly') from error
 
 
 @app.get('/health', summary='Database availability and recent collection freshness')
@@ -94,3 +101,31 @@ def explanation(story_id: StoryID, end: Cutoff):
         raise HTTPException(404, 'No observations for this story in the requested 22-minute interval')
     return {'as_of': end.isoformat(), 'detector_version': VERSION, 'rules': RULES,
             'story': evaluate(rows, end)}
+
+
+@app.get('/v1/reddit/posts', summary='Recently observed Reddit submissions by source-specific metrics')
+def reddit_posts(end: Cutoff, limit: Annotated[int, Query(ge=1, le=100)] = 20,
+                 subreddit: str | None = Query(default=None, min_length=1, max_length=100)):
+    latest = {}
+    for row in read_reddit(end):
+        if subreddit and row['subreddit'].casefold() != subreddit.casefold():
+            continue
+        post_id = row['post_id']
+        if post_id not in latest or timestamp(row['observed_at']) > timestamp(latest[post_id]['observed_at']):
+            latest[post_id] = row
+    ordered = sorted(latest.values(), key=lambda row: (-timestamp(row['observed_at']).timestamp(), row['post_id']))
+    return {'as_of': end.isoformat(), 'total': len(ordered), 'posts': [
+        {'post_id': row['post_id'], 'subreddit': row['subreddit'], 'title': row['title'], 'url': row['url'],
+         'observed_at': row['observed_at'], 'score': int(row['score']), 'comments': int(row['comments']),
+         'upvote_ratio': float(row['upvote_ratio']),
+         'fresh': (end-timestamp(row['observed_at'])).total_seconds() <= 180}
+        for row in ordered[:limit]]}
+
+
+@app.get('/v1/reddit/posts/{post_id}/history', summary='Reddit post-level observations; not yet part of the HN detector')
+def reddit_history(post_id: Annotated[str, Path(min_length=1, max_length=100)], end: Cutoff):
+    rows = read_reddit(end, minutes=120, post_id=post_id)
+    if not rows:
+        raise HTTPException(404, 'No Reddit observations for this post in the requested two-hour interval')
+    return {'as_of': end.isoformat(), 'post_id': post_id, 'source': 'reddit', 'evidence': rows,
+            'note': 'Reddit metrics are collected separately while cross-source topic matching is developed.'}

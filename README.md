@@ -2,7 +2,7 @@
 
 Know what's happening before everyone else.
 
-Pulse is a local prototype for detecting emerging internet topics. It collects Hacker News story observations, preserves history, and ranks stories whose recent attention growth has accelerated. This is an explainable heuristic; there is no frontend or calibrated Pulse Score yet.
+Pulse is a local prototype for detecting emerging internet topics. It collects Hacker News story observations, preserves history, and ranks stories whose recent attention growth has accelerated. A separate opt-in Reddit collector stores public submission-level metrics for a second source; it is not yet mixed into the HN detector or presented as a cross-source match.
 
 ## Data path
 
@@ -109,10 +109,33 @@ The FastAPI service runs locally at `http://localhost:8000`. Start it against th
 | `/v1/stories?limit=20&offset=0` | Recently sampled stories, including quiet ones |
 | `/v1/stories/{story_id}/history` | Attention changes and raw samples over the last 63 minutes |
 | `/v1/stories/{story_id}/explanation` | Candidate/quiet/excluded decision and channel-level evidence |
+| `/v1/reddit/posts` | Recent Reddit submissions and their latest observed metrics |
+| `/v1/reddit/posts/{post_id}/history` | Reddit's source-specific raw observations over two hours |
 
 All `/v1` routes accept `as_of`, a timezone-aware ISO timestamp. Future or malformed cutoffs and invalid IDs/limits return 422. An unavailable observation store returns a sanitized 503. A story with no observations in the requested interval returns 404; this does not mean the story never existed. Empty rankings return 200 with coverage counts so insufficient evidence is distinguishable from quiet activity. Use `evidence=false` to omit raw samples from history responses.
 
 The API uses the same calculation code as the CLI. Requests have bounded observation windows and run as synchronous FastAPI handlers so database reads do not block the event loop. It is read-only and bound to localhost; authentication, caching, WebSockets and public deployment are not implemented. `/health` checks collection/database freshness, not Flink checkpoint health.
+
+## Add Reddit locally
+
+Reddit collection is opt-in. It uses OAuth client credentials and retains only post-level fields needed for Pulse (title, subreddit, permalink, creation time, score, comment count, and vote ratio). It never stores an author, body text, or OAuth token; the raw Reddit table automatically removes observations after 30 days.
+
+Create a Reddit app that supplies OAuth client credentials, then copy `.env.example` to `.env` and replace its three credential placeholders. Choose an identifiable `REDDIT_USER_AGENT` containing your Reddit username. Keep `.env` private: it is already ignored by Git.
+
+Apply the additive table migration and start the opt-in collector:
+
+```sh
+docker compose exec -T clickhouse clickhouse-client --user pulse --password pulse-local --multiquery < infra/clickhouse/002_observations.sql
+docker compose --profile reddit up -d --build reddit-ingestion
+```
+
+After a few minutes, confirm that it is receiving data:
+
+```sh
+docker compose exec clickhouse clickhouse-client --user pulse --password pulse-local --query "SELECT subreddit, count() FROM pulse.reddit_observations FINAL GROUP BY subreddit ORDER BY count() DESC"
+```
+
+The Reddit routes are intentionally source-specific for now. A post ID and an HN story ID do not establish that they describe the same topic; cross-source matching needs an explicit evidence rule before it can produce combined alerts.
 
 Run the complete suite (41 analytics tests plus 12 API tests) with Python 3.12 supplied by Docker:
 
@@ -185,3 +208,4 @@ See `docs/phase-2-verification.md` for storage/recovery validation and `docs/det
 - [Flink Kafka SQL connector](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/connectors/table/kafka/)
 - [Flink savepoints](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/ops/state/savepoints/)
 - [ClickHouse Kafka engine](https://clickhouse.com/docs/engines/table-engines/integrations/kafka)
+- [Reddit Data API Terms](https://redditinc.com/policies/data-api-terms)
