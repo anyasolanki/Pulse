@@ -1,17 +1,21 @@
-"""Read-only investigation API over the same evidence and rules as the CLI."""
-from datetime import datetime, timezone
-from typing import Annotated
+"""Local evidence API and immutable 24-hour calls over the same detector rules."""
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Literal
 from urllib.error import URLError
+from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from analytics import reddit_store, store
 from analytics.attention import attention, timestamp
 from analytics.detector import detect, evaluate, VERSION, RULES
+from analytics.predictions import evaluate_prediction
+from api import prediction_store
 
-app = FastAPI(title='Pulse API', version='0.1.0', description=
-              'Local Hacker News attention investigation. Signals are heuristic, not predictions. '
-              'Historical cutoffs use observation time and can incorporate late-arriving evidence.')
+app = FastAPI(title='Pulse API', version='0.2.0', description=
+              'Local Hacker News attention investigation and browser-local 24-hour calls. '
+              'Signals are heuristic, and resolutions use only observations available by the call deadline.')
 
 
 def cutoff(as_of: Annotated[datetime | None, Query(description='Timezone-aware ISO cutoff; defaults to now in UTC')] = None):
@@ -27,6 +31,22 @@ def cutoff(as_of: Annotated[datetime | None, Query(description='Timezone-aware I
 
 Cutoff = Annotated[datetime, Depends(cutoff)]
 StoryID = Annotated[int, Path(gt=0, le=9223372036854775807)]
+
+
+class PredictionRequest(BaseModel):
+    call: Literal['yes', 'no']
+
+
+def local_user(x_pulse_local_user: Annotated[str | None, Header(alias='X-Pulse-Local-User')] = None):
+    if not x_pulse_local_user:
+        raise HTTPException(422, 'A local Pulse user ID is required to lock a call')
+    try:
+        return UUID(x_pulse_local_user)
+    except ValueError as error:
+        raise HTTPException(422, 'The local Pulse user ID is invalid') from error
+
+
+LocalUser = Annotated[UUID, Depends(local_user)]
 
 
 def read(end, minutes=22, story_id=None):
@@ -129,3 +149,57 @@ def reddit_history(post_id: Annotated[str, Path(min_length=1, max_length=100)], 
         raise HTTPException(404, 'No Reddit observations for this post in the requested two-hour interval')
     return {'as_of': end.isoformat(), 'post_id': post_id, 'source': 'reddit', 'evidence': rows,
             'note': 'Reddit metrics are collected separately while cross-source topic matching is developed.'}
+
+
+def prediction_error(error):
+    if isinstance(error, prediction_store.StoreUnavailable):
+        raise HTTPException(503, 'Prediction store is unavailable; try again shortly') from error
+    raise error
+
+
+@app.post('/v1/stories/{story_id}/predictions', status_code=201,
+          summary='Lock a local 24-hour top-ten Pulse signal call')
+def lock_prediction(story_id: StoryID, request: PredictionRequest, user: LocalUser):
+    created_at = datetime.now(timezone.utc)
+    rows = read(created_at, minutes=63, story_id=story_id)
+    if not rows:
+        raise HTTPException(404, 'This story is no longer in the recent observation window')
+    latest = max(rows, key=lambda row: timestamp(row['observed_at']))
+    try:
+        prediction = prediction_store.create(user, story_id, latest['title'], request.call,
+                                             created_at, created_at + timedelta(hours=24))
+    except Exception as error:
+        prediction_error(error)
+    if prediction is None:
+        raise HTTPException(409, 'You already locked a call for this story on this browser')
+    return {'prediction': prediction,
+            'rule': 'Correct when this story is ranked in the top 10 HN detector candidates at any five-minute check in the next 24 hours.'}
+
+
+@app.get('/v1/predictions', summary='Local browser calls and their latest resolution state')
+def predictions(user: LocalUser):
+    try:
+        return {'predictions': prediction_store.list_for_owner(user)}
+    except Exception as error:
+        prediction_error(error)
+
+
+@app.post('/v1/predictions/resolve', summary='Resolve expired calls from stored HN observations')
+def resolve_predictions(user: LocalUser):
+    now = datetime.now(timezone.utc)
+    try:
+        due = prediction_store.due_for_owner(user, now)
+    except Exception as error:
+        prediction_error(error)
+    resolved = []
+    for prediction in due:
+        rows = read(timestamp(prediction['expires_at']), minutes=24 * 60 + 27)
+        resolution = evaluate_prediction(rows, prediction['story_id'], prediction['created_at'], prediction['expires_at'])
+        resolution['call'] = prediction['call']
+        try:
+            result = prediction_store.resolve(prediction['id'], user, resolution, now)
+        except Exception as error:
+            prediction_error(error)
+        if result:
+            resolved.append(result)
+    return {'resolved': resolved, 'checked_at': now.isoformat()}

@@ -13,6 +13,8 @@ HN API → Python → Kafka observations ─────────→ ClickHou
              event-time minute windows          + original evidence
                        ↓
                 Kafka window results → ClickHouse story_windows_v2
+
+Local Pulse calls ─────────────────────────────→ PostgreSQL transactional history
 ```
 
 Raw history is independent of Flink window completion. Even observations arriving after a window closes remain available for investigation. The archived fields are normalized API observations, not full original HN JSON responses.
@@ -111,10 +113,21 @@ The FastAPI service runs locally at `http://localhost:8000`. Start it against th
 | `/v1/stories/{story_id}/explanation` | Candidate/quiet/excluded decision and channel-level evidence |
 | `/v1/reddit/posts` | Recent Reddit submissions and their latest observed metrics |
 | `/v1/reddit/posts/{post_id}/history` | Reddit's source-specific raw observations over two hours |
+| `POST /v1/stories/{story_id}/predictions` | Lock a local `yes` or `no` 24-hour call |
+| `/v1/predictions` | Calls associated with the current browser |
+| `POST /v1/predictions/resolve` | Evaluate expired calls from archived HN observations |
 
 All `/v1` routes accept `as_of`, a timezone-aware ISO timestamp. Future or malformed cutoffs and invalid IDs/limits return 422. An unavailable observation store returns a sanitized 503. A story with no observations in the requested interval returns 404; this does not mean the story never existed. Empty rankings return 200 with coverage counts so insufficient evidence is distinguishable from quiet activity. Use `evidence=false` to omit raw samples from history responses.
 
-The API uses the same calculation code as the CLI. Requests have bounded observation windows and run as synchronous FastAPI handlers so database reads do not block the event loop. It is read-only and bound to localhost; authentication, caching, WebSockets and public deployment are not implemented. `/health` checks collection/database freshness, not Flink checkpoint health.
+The API uses the same calculation code as the CLI. Requests have bounded observation windows and run as synchronous FastAPI handlers so database reads do not block the event loop. It is bound to localhost; authentication, caching, WebSockets and public deployment are not implemented. `/health` checks collection/database freshness, not Flink checkpoint health.
+
+## Make and resolve a call
+
+PostgreSQL stores the small transactional part of Pulse: each browser gets a random local ID, and it can lock one `yes` or `no` call per HN story. The ID stays in that browser’s local storage; there is no account, sync, or public profile yet.
+
+A call asks whether the story will appear in the top ten HN detector candidates at any five-minute check during the next 24 hours. The choice is immutable. When the browser returns after expiry, Pulse evaluates the archived HN observations without reading past the deadline. A result is `unverifiable`, rather than `no`, if collection coverage misses more than 10% of those checks.
+
+Open a story in the local frontend, choose **YES** or **NO**, then use **My calls** to see the locked call and any resolved result. PostgreSQL starts automatically with `docker compose up -d --build`; its development data is in the `postgres-data` Docker volume.
 
 ## Reddit source: approval required
 
@@ -141,7 +154,7 @@ curl 'http://127.0.0.1:8000/v1/reddit/posts'
 
 The Reddit routes are intentionally source-specific for now. A post ID and an HN story ID do not establish that they describe the same topic; cross-source matching needs an explicit evidence rule before it can produce combined alerts.
 
-Run the complete suite (41 analytics tests plus 12 API tests) with Python 3.12 supplied by Docker:
+Run the complete suite (45 analytics tests plus 17 API tests) with Python 3.12 supplied by Docker:
 
 ```sh
 docker compose run --rm --build --no-deps api-tests
@@ -158,7 +171,7 @@ cd frontend
 npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-Open `http://127.0.0.1:3000`. The Radar view refreshes every 30 seconds and makes empty rankings explicit. Select any recently observed story to inspect its 5/30/60-minute changes, detector explanation, charts, and original samples. Observation gaps longer than three minutes appear as chart breaks and amber evidence-table rows.
+Open `http://127.0.0.1:3000`. The Radar view refreshes every 30 seconds and makes empty rankings explicit. Select any recently observed story to inspect its 5/30/60-minute changes, detector explanation, charts, original samples, and a 24-hour call. **My calls** shows the browser-local forecast history. Observation gaps longer than three minutes appear as chart breaks and amber evidence-table rows.
 
 The frontend is deliberately local because its live data service runs on this Mac. It does not authenticate users, publish the data, or provide a remote deployment. Validate it with:
 

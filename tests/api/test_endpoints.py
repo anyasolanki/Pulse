@@ -101,3 +101,26 @@ class APITests(unittest.TestCase):
             response = self.client.get('/v1/reddit/posts/a1/history', params=self.params)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['source'], 'reddit')
+
+    def test_prediction_locks_a_call_for_the_local_browser(self):
+        saved = {'id': '9fbdc9d6-6100-44cd-b00e-670acfb20e7c', 'story_id': 42,
+                 'story_title': 'Story 42', 'call': 'yes', 'status': 'pending',
+                 'created_at': NOW, 'expires_at': NOW + timedelta(hours=24)}
+        with patch('api.main.prediction_store.create', return_value=saved) as create:
+            response = self.client.post('/v1/stories/42/predictions', json={'call': 'yes'},
+                                        headers={'X-Pulse-Local-User': '00000000-0000-4000-8000-000000000001'})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['prediction']['call'], 'yes')
+        create.assert_called_once()
+
+    def test_prediction_rejects_invalid_local_user(self):
+        response = self.client.post('/v1/stories/42/predictions', json={'call': 'no'},
+                                    headers={'X-Pulse-Local-User': 'not-a-uuid'})
+        self.assertEqual(response.status_code, 422)
+
+    def test_prediction_store_failure_is_sanitized(self):
+        from api.prediction_store import StoreUnavailable
+        with patch('api.main.prediction_store.list_for_owner', side_effect=StoreUnavailable('secret connection')):
+            response = self.client.get('/v1/predictions', headers={'X-Pulse-Local-User': '00000000-0000-4000-8000-000000000001'})
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('secret', response.text)
