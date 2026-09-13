@@ -16,6 +16,8 @@ HN API → Python → Kafka observations ─────────→ ClickHou
 
 Local Pulse calls ─────────────────────────────→ PostgreSQL transactional history
 
+Browser-local watchlist ───────────────────────→ PostgreSQL transactional history
+
 Open an investigation ─────────────────────────→ Wikimedia reference lookup + recent page-view context
 ```
 
@@ -119,6 +121,8 @@ The FastAPI service runs locally at `http://localhost:8000`. Start it against th
 | `POST /v1/stories/{story_id}/predictions` | Lock a local `yes` or `no` 24-hour call |
 | `/v1/predictions` | Calls associated with the current browser |
 | `/v1/profile` | Browser-local verified accuracy, prediction count, and average lead time |
+| `POST /v1/stories/{story_id}/watchlist` | Save a recently observed HN story to this browser's watchlist |
+| `/v1/watchlist` | Browser-local saved stories |
 | `POST /v1/predictions/resolve` | Evaluate expired calls from archived HN observations |
 
 All `/v1` routes accept `as_of`, a timezone-aware ISO timestamp. Future or malformed cutoffs and invalid IDs/limits return 422. An unavailable observation store returns a sanitized 503. A story with no observations in the requested interval returns 404; this does not mean the story never existed. Empty rankings return 200 with coverage counts so insufficient evidence is distinguishable from quiet activity. Use `evidence=false` to omit raw samples from history responses.
@@ -137,6 +141,12 @@ Open a story in the local frontend, choose **YES** or **NO**, set your confidenc
 
 ```sh
 docker compose exec -T postgres psql -U pulse -d pulse -c "ALTER TABLE predictions ADD COLUMN IF NOT EXISTS confidence SMALLINT NOT NULL DEFAULT 50 CHECK (confidence BETWEEN 50 AND 100);"
+```
+
+Use **Watch story** in an investigation to save it locally without making a call. **Watchlist** lets you return to or remove saved stories. It records only the HN story ID, title, destination URL, and time it was saved. For an existing database, apply the watchlist migration once:
+
+```sh
+docker compose exec -T postgres psql -U pulse -d pulse < infra/postgres/003_watchlist.sql
 ```
 
 ## Reddit source: approval required

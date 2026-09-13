@@ -11,7 +11,7 @@ from analytics import reddit_store, store
 from analytics.attention import attention, timestamp
 from analytics.detector import detect, evaluate, VERSION, RULES
 from analytics.predictions import evaluate_prediction
-from api import prediction_store, wikipedia
+from api import prediction_store, watch_store, wikipedia
 
 app = FastAPI(title='Pulse API', version='0.2.0', description=
               'Local Hacker News attention investigation and browser-local 24-hour calls. '
@@ -162,8 +162,8 @@ def reddit_history(post_id: Annotated[str, Path(min_length=1, max_length=100)], 
 
 
 def prediction_error(error):
-    if isinstance(error, prediction_store.StoreUnavailable):
-        raise HTTPException(503, 'Prediction store is unavailable; try again shortly') from error
+    if isinstance(error, (prediction_store.StoreUnavailable, watch_store.StoreUnavailable)):
+        raise HTTPException(503, 'Local profile store is unavailable; try again shortly') from error
     raise error
 
 
@@ -198,6 +198,37 @@ def predictions(user: LocalUser):
 def profile(user: LocalUser):
     try:
         return prediction_store.profile_for_owner(user)
+    except Exception as error:
+        prediction_error(error)
+
+
+@app.post('/v1/stories/{story_id}/watchlist', status_code=201,
+          summary='Save an HN story to this browser-local watchlist')
+def watch_story(story_id: StoryID, user: LocalUser):
+    now = datetime.now(timezone.utc)
+    rows = read(now, minutes=63, story_id=story_id)
+    if not rows:
+        raise HTTPException(404, 'This story is no longer in the recent observation window')
+    latest = max(rows, key=lambda row: timestamp(row['observed_at']))
+    try:
+        return {'watch': watch_store.create(user, story_id, latest['title'], latest.get('url'), now)}
+    except Exception as error:
+        prediction_error(error)
+
+
+@app.get('/v1/watchlist', summary='Stories saved to the current browser-local watchlist')
+def watchlist(user: LocalUser):
+    try:
+        return {'watchlist': watch_store.list_for_owner(user)}
+    except Exception as error:
+        prediction_error(error)
+
+
+@app.delete('/v1/watchlist/{story_id}', status_code=204,
+            summary='Remove a story from this browser-local watchlist')
+def remove_watch(story_id: StoryID, user: LocalUser):
+    try:
+        watch_store.remove(user, story_id)
     except Exception as error:
         prediction_error(error)
 

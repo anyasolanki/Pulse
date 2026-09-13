@@ -135,6 +135,24 @@ class APITests(unittest.TestCase):
         self.assertEqual(response.json()['accuracy'], 50.0)
         profile.assert_called_once()
 
+    def test_story_can_be_saved_to_local_watchlist(self):
+        watch = {'story_id': 42, 'story_title': 'Story 42', 'created': True}
+        with patch('api.main.watch_store.create', return_value=watch) as create:
+            response = self.client.post('/v1/stories/42/watchlist',
+                                        headers={'X-Pulse-Local-User': '00000000-0000-4000-8000-000000000001'})
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json()['watch']['created'])
+        create.assert_called_once()
+
+    def test_watchlist_is_scoped_to_local_browser(self):
+        saved = [{'story_id': 42, 'story_title': 'Story 42'}]
+        with patch('api.main.watch_store.list_for_owner', return_value=saved) as watchlist:
+            response = self.client.get('/v1/watchlist',
+                                       headers={'X-Pulse-Local-User': '00000000-0000-4000-8000-000000000001'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['watchlist'], saved)
+        watchlist.assert_called_once()
+
     def test_prediction_rejects_invalid_local_user(self):
         response = self.client.post('/v1/stories/42/predictions', json={'call': 'no'},
                                     headers={'X-Pulse-Local-User': 'not-a-uuid'})
