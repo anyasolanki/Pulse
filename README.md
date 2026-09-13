@@ -15,6 +15,8 @@ HN API → Python → Kafka observations ─────────→ ClickHou
                 Kafka window results → ClickHouse story_windows_v2
 
 Local Pulse calls ─────────────────────────────→ PostgreSQL transactional history
+
+Open an investigation ─────────────────────────→ Wikimedia reference lookup + recent page-view context
 ```
 
 Raw history is independent of Flink window completion. Even observations arriving after a window closes remain available for investigation. The archived fields are normalized API observations, not full original HN JSON responses.
@@ -111,6 +113,7 @@ The FastAPI service runs locally at `http://localhost:8000`. Start it against th
 | `/v1/stories?limit=20&offset=0` | Recently sampled stories, including quiet ones |
 | `/v1/stories/{story_id}/history` | Attention changes and raw samples over the last 63 minutes |
 | `/v1/stories/{story_id}/explanation` | Candidate/quiet/excluded decision and channel-level evidence |
+| `/v1/stories/{story_id}/wikipedia` | On-demand Wikipedia reference context and the last 14 completed daily page-view buckets |
 | `/v1/reddit/posts` | Recent Reddit submissions and their latest observed metrics |
 | `/v1/reddit/posts/{post_id}/history` | Reddit's source-specific raw observations over two hours |
 | `POST /v1/stories/{story_id}/predictions` | Lock a local `yes` or `no` 24-hour call |
@@ -120,6 +123,8 @@ The FastAPI service runs locally at `http://localhost:8000`. Start it against th
 All `/v1` routes accept `as_of`, a timezone-aware ISO timestamp. Future or malformed cutoffs and invalid IDs/limits return 422. An unavailable observation store returns a sanitized 503. A story with no observations in the requested interval returns 404; this does not mean the story never existed. Empty rankings return 200 with coverage counts so insufficient evidence is distinguishable from quiet activity. Use `evidence=false` to omit raw samples from history responses.
 
 The API uses the same calculation code as the CLI. Requests have bounded observation windows and run as synchronous FastAPI handlers so database reads do not block the event loop. It is bound to localhost; authentication, caching, WebSockets and public deployment are not implemented. `/health` checks collection/database freshness, not Flink checkpoint health.
+
+When an investigation opens, Pulse also makes a small, on-demand Wikimedia lookup using the HN title. It returns the top automated Wikipedia search result only as **reference context**, never as a verified topic match or detector input. The API retrieves a title, short description, and up to 14 fully completed daily page-view buckets, then keeps that result in its process memory for 15 minutes. It does not persist Wikipedia content or metrics. The frontend links to the source and labels an unavailable or missing result rather than inventing context. `WIKIMEDIA_USER_AGENT` can override the descriptive default request identifier; keep a contact URL or email in any custom value. The lookup sends one search request and, only when a result exists, one page-view request; it honours rate-limit responses with a local cooldown.
 
 ## Make and resolve a call
 
@@ -226,3 +231,5 @@ See `docs/phase-2-verification.md` for storage/recovery validation and `docs/det
 - [Flink savepoints](https://nightlies.apache.org/flink/flink-docs-release-1.20/docs/ops/state/savepoints/)
 - [ClickHouse Kafka engine](https://clickhouse.com/docs/engines/table-engines/integrations/kafka)
 - [Reddit Data API Terms](https://redditinc.com/policies/data-api-terms)
+- [Wikimedia REST API reference](https://www.mediawiki.org/wiki/API:REST_API/Reference)
+- [Wikimedia API usage guidelines](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_API_Usage_Guidelines)

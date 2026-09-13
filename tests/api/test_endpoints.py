@@ -40,6 +40,14 @@ class APITests(unittest.TestCase):
         self.assertEqual(response.json()['story']['status'], 'candidate')
         self.assertFalse(response.json()['story']['channels']['score']['qualifies'])
 
+    def test_wikipedia_context_uses_the_latest_story_title(self):
+        context = {'status': 'found', 'article': {'title': 'Story 42'}, 'pageviews': {'status': 'available'}}
+        with patch('api.main.wikipedia.for_story', return_value=context) as lookup:
+            response = self.client.get('/v1/stories/42/wikipedia', params=self.params)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['article']['title'], 'Story 42')
+        lookup.assert_called_once_with('Story 42')
+
     def test_missing_interval_is_404(self):
         self.read.return_value = []
         self.assertEqual(self.client.get('/v1/stories/42/history', params=self.params).status_code, 404)

@@ -11,7 +11,7 @@ from analytics import reddit_store, store
 from analytics.attention import attention, timestamp
 from analytics.detector import detect, evaluate, VERSION, RULES
 from analytics.predictions import evaluate_prediction
-from api import prediction_store
+from api import prediction_store, wikipedia
 
 app = FastAPI(title='Pulse API', version='0.2.0', description=
               'Local Hacker News attention investigation and browser-local 24-hour calls. '
@@ -121,6 +121,15 @@ def explanation(story_id: StoryID, end: Cutoff):
         raise HTTPException(404, 'No observations for this story in the requested 22-minute interval')
     return {'as_of': end.isoformat(), 'detector_version': VERSION, 'rules': RULES,
             'story': evaluate(rows, end)}
+
+
+@app.get('/v1/stories/{story_id}/wikipedia', summary='On-demand Wikipedia reference context and recent page views')
+def wikipedia_context(story_id: StoryID, end: Cutoff):
+    rows = read(end, minutes=63, story_id=story_id)
+    if not rows:
+        raise HTTPException(404, 'No observations for this story in the requested 63-minute interval')
+    latest = max(rows, key=lambda row: timestamp(row['observed_at']))
+    return {'story_id': story_id, 'story_title': latest['title'], **wikipedia.for_story(latest['title'])}
 
 
 @app.get('/v1/reddit/posts', summary='Recently observed Reddit submissions by source-specific metrics')
