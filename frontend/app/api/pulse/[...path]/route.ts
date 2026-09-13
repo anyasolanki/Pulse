@@ -1,4 +1,4 @@
-const known = (suffix: string) => /^(health|v1\/(radar|stories|stories\/\d+\/(history|explanation|wikipedia|predictions)|predictions(\/resolve)?))$/.test(suffix);
+const known = (suffix: string) => /^(health|v1\/(radar|profile|stories|stories\/\d+\/(history|explanation|wikipedia|predictions)|predictions(\/resolve)?))$/.test(suffix);
 
 async function forward(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;

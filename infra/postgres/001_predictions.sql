@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     story_id BIGINT NOT NULL CHECK (story_id > 0),
     story_title TEXT NOT NULL,
     call TEXT NOT NULL CHECK (call IN ('yes', 'no')),
+    confidence SMALLINT NOT NULL DEFAULT 50 CHECK (confidence BETWEEN 50 AND 100),
     created_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL CHECK (expires_at > created_at),
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'resolved', 'unverifiable')),

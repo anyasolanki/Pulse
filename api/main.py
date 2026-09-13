@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from analytics import reddit_store, store
 from analytics.attention import attention, timestamp
 from analytics.detector import detect, evaluate, VERSION, RULES
@@ -35,6 +35,7 @@ StoryID = Annotated[int, Path(gt=0, le=9223372036854775807)]
 
 class PredictionRequest(BaseModel):
     call: Literal['yes', 'no']
+    confidence: int = Field(default=50, ge=50, le=100)
 
 
 def local_user(x_pulse_local_user: Annotated[str | None, Header(alias='X-Pulse-Local-User')] = None):
@@ -175,7 +176,7 @@ def lock_prediction(story_id: StoryID, request: PredictionRequest, user: LocalUs
         raise HTTPException(404, 'This story is no longer in the recent observation window')
     latest = max(rows, key=lambda row: timestamp(row['observed_at']))
     try:
-        prediction = prediction_store.create(user, story_id, latest['title'], request.call,
+        prediction = prediction_store.create(user, story_id, latest['title'], request.call, request.confidence,
                                              created_at, created_at + timedelta(hours=24))
     except Exception as error:
         prediction_error(error)
@@ -189,6 +190,14 @@ def lock_prediction(story_id: StoryID, request: PredictionRequest, user: LocalUs
 def predictions(user: LocalUser):
     try:
         return {'predictions': prediction_store.list_for_owner(user)}
+    except Exception as error:
+        prediction_error(error)
+
+
+@app.get('/v1/profile', summary='Local browser call record and verified accuracy')
+def profile(user: LocalUser):
+    try:
+        return prediction_store.profile_for_owner(user)
     except Exception as error:
         prediction_error(error)
 

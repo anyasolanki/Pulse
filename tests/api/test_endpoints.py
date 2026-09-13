@@ -119,7 +119,21 @@ class APITests(unittest.TestCase):
                                         headers={'X-Pulse-Local-User': '00000000-0000-4000-8000-000000000001'})
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()['prediction']['call'], 'yes')
-        create.assert_called_once()
+        self.assertEqual(create.call_args.args[4], 50)
+
+    def test_prediction_rejects_out_of_range_confidence(self):
+        response = self.client.post('/v1/stories/42/predictions', json={'call': 'no', 'confidence': 45},
+                                    headers={'X-Pulse-Local-User': '00000000-0000-4000-8000-000000000001'})
+        self.assertEqual(response.status_code, 422)
+
+    def test_profile_returns_verified_record_for_the_local_browser(self):
+        record = {'total': 3, 'pending': 1, 'resolved': 2, 'unverifiable': 0,
+                  'scored': 2, 'correct': 1, 'accuracy': 50.0, 'average_early_minutes': 180.0}
+        with patch('api.main.prediction_store.profile_for_owner', return_value=record) as profile:
+            response = self.client.get('/v1/profile', headers={'X-Pulse-Local-User': '00000000-0000-4000-8000-000000000001'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['accuracy'], 50.0)
+        profile.assert_called_once()
 
     def test_prediction_rejects_invalid_local_user(self):
         response = self.client.post('/v1/stories/42/predictions', json={'call': 'no'},

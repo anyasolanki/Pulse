@@ -118,6 +118,7 @@ The FastAPI service runs locally at `http://localhost:8000`. Start it against th
 | `/v1/reddit/posts/{post_id}/history` | Reddit's source-specific raw observations over two hours |
 | `POST /v1/stories/{story_id}/predictions` | Lock a local `yes` or `no` 24-hour call |
 | `/v1/predictions` | Calls associated with the current browser |
+| `/v1/profile` | Browser-local verified accuracy, prediction count, and average lead time |
 | `POST /v1/predictions/resolve` | Evaluate expired calls from archived HN observations |
 
 All `/v1` routes accept `as_of`, a timezone-aware ISO timestamp. Future or malformed cutoffs and invalid IDs/limits return 422. An unavailable observation store returns a sanitized 503. A story with no observations in the requested interval returns 404; this does not mean the story never existed. Empty rankings return 200 with coverage counts so insufficient evidence is distinguishable from quiet activity. Use `evidence=false` to omit raw samples from history responses.
@@ -128,11 +129,15 @@ When an investigation opens, Pulse also makes a small, on-demand Wikimedia looku
 
 ## Make and resolve a call
 
-PostgreSQL stores the small transactional part of Pulse: each browser gets a random local ID, and it can lock one `yes` or `no` call per HN story. The ID stays in that browser’s local storage; there is no account, sync, or public profile yet.
+PostgreSQL stores the small transactional part of Pulse: each browser gets a random local ID, and it can lock one `yes` or `no` call per HN story with a 50–100% confidence choice. The ID stays in that browser’s local storage; there is no account, sync, or public profile yet.
 
 A call asks whether the story will appear in the top ten HN detector candidates at any five-minute check during the next 24 hours. The choice is immutable. When the browser returns after expiry, Pulse evaluates the archived HN observations without reading past the deadline. A result is `unverifiable`, rather than `no`, if collection coverage misses more than 10% of those checks.
 
-Open a story in the local frontend, choose **YES** or **NO**, then use **My calls** to see the locked call and any resolved result. PostgreSQL starts automatically with `docker compose up -d --build`; its development data is in the `postgres-data` Docker volume.
+Open a story in the local frontend, choose **YES** or **NO**, set your confidence, then use **My calls** to see the locked call and any resolved result. The record shows accuracy only for resolved calls and average lead time only for correct YES calls; collection gaps remain separate as `unverifiable`. PostgreSQL starts automatically with `docker compose up -d --build`; its development data is in the `postgres-data` Docker volume. Fresh databases apply the confidence column automatically. For an existing database, apply the additive migration once:
+
+```sh
+docker compose exec -T postgres psql -U pulse -d pulse -c "ALTER TABLE predictions ADD COLUMN IF NOT EXISTS confidence SMALLINT NOT NULL DEFAULT 50 CHECK (confidence BETWEEN 50 AND 100);"
+```
 
 ## Reddit source: approval required
 
